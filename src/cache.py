@@ -56,11 +56,11 @@ class CacheManager:
         self.enabled = False
         # Connect to Redis and set self.enabled accordingly
         try:
-            seld.redis_client = redis.Redis(host=self.host, port=self.port, db=self.db, decode_responses=True)
+            self.redis_client = redis.Redis(host=self.host, port=self.port, db=self.db, decode_responses=True)
             self.redis_client.ping() # Test connection
             self.enabled = True
         except redis.RedisError:
-            print("Warning: Redis is unavailable. Caching is disabled.")
+            self.enabled = False
 
     def get(self, key: str) -> Optional[Any]:
         """
@@ -103,7 +103,7 @@ class CacheManager:
             True if the value was stored successfully, False otherwise.
         """
         # Implement cache storage
-        if key is None or value is None:
+        if key is None:
             return False
         if not self.enabled:
             return False

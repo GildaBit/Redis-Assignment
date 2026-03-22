@@ -72,13 +72,25 @@ def before_each_request():
     """
     Runs before every incoming request.
 
-    TODO: Check the rate limiter and reject over-limit requests with HTTP 429.
+    Check the rate limiter and reject over-limit requests with HTTP 429.
     Include rate-limit info in the response headers.
     """
     request.start_time = time.time()
     stats["requests_total"] += 1
 
-    # TODO: Implement rate limiting check here
+    # Implement rate limiting check here
+    if rate_limiter.enabled:
+        client_id = f"{request.remote_addr}:{request.method}:{request.path}"  # Use client IP as identifier
+        allowed, info = rate_limiter.is_allowed(client_id) # Check if the request is allowed
+        # Add rate limit info to response headers
+        request.rate_limit_info = info  # Store info for after_request to add to headers
+        if not allowed:
+            stats["requests_rate_limited"] += 1
+            return jsonify({
+                "error": "Rate limit exceeded",
+                "retry_after": info["reset_in"],
+            }), 429
+        
 
 
 @app.after_request
@@ -101,17 +113,28 @@ def list_products():
     GET /products
     GET /products?category=Electronics
 
-    TODO: Add caching to this endpoint. Track cache hits/misses in stats.
+    Add caching to this endpoint. Track cache hits/misses in stats.
     """
+
+    # get category filter from query parameters
     category = request.args.get("category")
 
-    # TODO: Add caching
+    # Gets the cache key based on category if provided
+    cache_key = f"products:category:{category}" if category else "products:all"
+    result = cache.get(cache_key)
+    if result is not None:
+        stats["cache_hits"] += 1
+        return jsonify(result) # Return cached result if available
+    else:
+        stats["cache_misses"] += 1
 
     if category:
         products = database.get_products_by_category(category)
     else:
         products = database.get_all_products()
-
+    
+    # Cache the result before returning on miss
+    cache.set(cache_key, products)
     return jsonify(products)
 
 
@@ -122,16 +145,26 @@ def get_product(product_id: int):
 
     GET /products/1
 
-    TODO: Add caching to this endpoint. Track cache hits/misses in stats.
+    Add caching to this endpoint. Track cache hits/misses in stats.
     Do not cache 404 responses.
     """
-    # TODO: Check cache first
+    # Check cache first
+    cache_key = f"product:{product_id}"
+    result = cache.get(cache_key) # will return None if not found
+    if result is not None:
+        stats["cache_hits"] += 1
+        return jsonify(result) # Return cached result if available
+    else:
+        # otherwise it's a cache miss
+        stats["cache_misses"] += 1
 
+    # Find the product in the database
     product = database.get_product(product_id)
     if product is None:
         return jsonify({"error": "Product not found"}), 404
 
-    # TODO: Cache the result before returning
+    # Cache the result before returning
+    cache.set(cache_key, product)
 
     return jsonify(product)
 
@@ -143,17 +176,25 @@ def search_products():
 
     GET /products/search?q=laptop
 
-    TODO: Add caching to this endpoint. Track cache hits/misses in stats.
+    Add caching to this endpoint. Track cache hits/misses in stats.
     """
     q = request.args.get("q")
     if not q:
         return jsonify({"error": "Query parameter 'q' is required"}), 400
 
-    # TODO: Check cache first
+    # Check cache first
+    cache_key = f"products:search:{q}"
+    result = cache.get(cache_key) # check if search query is in cache
+    if result is not None:
+        stats["cache_hits"] += 1
+        return jsonify(result) # Return cached result if available
+    else:
+        stats["cache_misses"] += 1
 
     products = database.search_products(q)
 
-    # TODO: Cache the result
+    # Cache the result
+    cache.set(cache_key, products)
 
     return jsonify(products)
 
@@ -166,15 +207,23 @@ def top_products():
     GET /products/top
     GET /products/top?limit=5
 
-    TODO: Add caching to this endpoint. Track cache hits/misses in stats.
+    Add caching to this endpoint. Track cache hits/misses in stats.
     """
     limit = request.args.get("limit", 10, type=int)
 
-    # TODO: Check cache first
+    # Check cache first
+    cache_key = f"products:top:{limit}" 
+    result = cache.get(cache_key) # check if top products query is in cache
+    if result is not None:
+        stats["cache_hits"] += 1
+        return jsonify(result) # Return cached result if available
+    else:
+        stats["cache_misses"] += 1
 
     products = database.get_top_rated(limit=limit)
 
-    # TODO: Cache the result
+    # Cache the result
+    cache.set(cache_key, products)
 
     return jsonify(products)
 
@@ -186,7 +235,7 @@ def products_by_price():
 
     GET /products/price-range?min=10&max=50
 
-    TODO: Add caching to this endpoint. Track cache hits/misses in stats.
+    Add caching to this endpoint. Track cache hits/misses in stats.
     """
     min_price = request.args.get("min", type=float)
     max_price = request.args.get("max", type=float)
@@ -196,11 +245,19 @@ def products_by_price():
             {"error": "Both 'min' and 'max' query parameters are required"}
         ), 400
 
-    # TODO: Check cache first
+    # Check cache first
+    cache_key = f"products:price-range:{min_price}:{max_price}"
+    result = cache.get(cache_key) # check if price range query is in cache
+    if result is not None:
+        stats["cache_hits"] += 1
+        return jsonify(result) # Return cached result if available
+    else:
+        stats["cache_misses"] += 1
 
     products = database.get_products_by_price_range(min_price, max_price)
 
-    # TODO: Cache the result
+    # Cache the result
+    cache.set(cache_key, products)
 
     return jsonify(products)
 
@@ -212,13 +269,21 @@ def list_categories():
 
     GET /categories
 
-    TODO: Add caching to this endpoint. Track cache hits/misses in stats.
+    Add caching to this endpoint. Track cache hits/misses in stats.
     """
-    # TODO: Check cache first
+    #  Check cache first
+    cache_key = "categories:all"
+    result = cache.get(cache_key) # check if categories list is in cache
+    if result is not None:
+        stats["cache_hits"] += 1
+        return jsonify(result) # Return cached result if available
+    else:
+        stats["cache_misses"] += 1
 
     categories = database.get_categories()
 
-    # TODO: Cache the result
+    # Cache the result
+    cache.set(cache_key, categories)
 
     return jsonify(categories)
 
@@ -234,7 +299,7 @@ def place_order():
     POST /orders
     Body: {"product_id": 1, "quantity": 2, "customer_name": "Alice"}
 
-    TODO: After creating the order, enqueue it for background processing,
+    After creating the order, enqueue it for background processing,
     publish an event, update stats, and invalidate affected caches.
     """
     data = request.get_json()
@@ -257,7 +322,11 @@ def place_order():
             {"error": "Could not create order. Product may not exist or insufficient stock."}
         ), 400
 
-    # TODO: Enqueue order, publish event, update stats, invalidate caches
+    # Enqueue order, publish event, update stats, invalidate caches
+    broker.enqueue(ORDER_QUEUE, order) # Add order to processing queue
+    broker.publish(ORDER_CHANNEL, order) # Publish event to notify listeners
+    stats["orders_queued"] += 1
+    cache.delete(f"product:{order['product_id']}") # Invalidate product cache since stock may have changed
 
     return jsonify(order), 201
 

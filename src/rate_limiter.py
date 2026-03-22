@@ -9,7 +9,6 @@ with too many requests. Each client (identified by IP address or API key)
 is allowed a certain number of requests within a fixed time window.
 Redis is used to atomically count requests and expire counters.
 
-TODO: Implement all methods marked with TODO.
 """
 
 import redis
@@ -40,7 +39,7 @@ class RateLimiter:
         """
         Initialize the RateLimiter.
 
-        TODO: Set self.enabled based on whether redis_client is available.
+        Set self.enabled based on whether redis_client is available.
 
         Args:
             redis_client: An active redis.Redis connection, or None.
@@ -52,13 +51,21 @@ class RateLimiter:
         self.window_seconds = window_seconds
         self.enabled = False
 
-        # TODO: Set self.enabled based on whether redis_client is available
+        # Set self.enabled based on whether redis_client is available
+        try:
+            self.redis_client.ping()  # Test connection
+            self.enabled = True
+        except Exception:
+            self.enabled = False
+        
+
+
 
     def is_allowed(self, client_id: str) -> Tuple[bool, dict]:
         """
         Check whether a client is allowed to make a request.
 
-        TODO: Implement fixed-window rate limiting.
+        Implement fixed-window rate limiting.
         Track per-client request counts and deny when over the limit.
         Fail open (allow all requests) if Redis is unavailable.
 
@@ -76,15 +83,40 @@ class RateLimiter:
             "current_count": 0,
         }
 
-        # TODO: Implement rate limiting logic
+        if client_id is None:
+            return (True, info)  # Fail open on invalid client_id
+        if not self.enabled:
+            return (True, info)  # Fail open if Redis is unavailable
+        
+        try:
+            key = f"rate_limit:{client_id}"
+            # increment the count for this client and set expiry if it's a new key
+            current_count = self.redis_client.incr(key)
+            if current_count == 1: # First request, set the expiration
+                self.redis_client.expire(key, self.window_seconds)
+            remaining = max(self.max_requests - current_count, 0) # Calculate remaining requests
+            reset_in = self.redis_client.ttl(key) # Calculate time until reset
+            # If key has expired, reset the count and reset_in, otherwise use current values
+            if reset_in is None or reset_in < 0:
+                reset_in = self.window_seconds  # Reset the window
 
-        return (True, info)
+            info.update({
+                "remaining": remaining,
+                "reset_in": reset_in,
+                "current_count": current_count,
+            })
+            # Determine if the request is allowed based on the current count
+            is_allowed = current_count <= self.max_requests
+            return (is_allowed, info)
+        except redis.RedisError:
+            return (True, info)  # Fail open on Redis error
+
 
     def get_usage(self, client_id: str) -> dict:
         """
         Get the current rate limit usage for a client without incrementing.
 
-        TODO: Read current usage for a client without incrementing.
+        Read current usage for a client without incrementing.
 
         Args:
             client_id: The client identifier.
@@ -92,10 +124,30 @@ class RateLimiter:
         Returns:
             A dict with rate limit usage information.
         """
-        # TODO: Implement usage lookup
-        return {
+        # Implement usage lookup
+        info = {
             "limit": self.max_requests,
             "remaining": self.max_requests,
             "reset_in": self.window_seconds,
             "current_count": 0,
         }
+        if client_id is None:
+            return info # Fail open on invalid client_id
+        if not self.enabled:
+            return info  # Fail open if Redis is unavailable
+        try:
+            key = f"rate_limit:{client_id}"
+            current_count = self.redis_client.get(key)
+            if current_count:
+                remaining = max(self.max_requests - int(current_count), 0)
+                reset_in = self.redis_client.ttl(key)
+                if reset_in is None or reset_in < 0:
+                    return info # Window has expired, return default info
+                info.update({
+                    "remaining": remaining,
+                    "reset_in": reset_in,
+                    "current_count": int(current_count),
+                })
+            return info
+        except redis.RedisError:
+            return info  # Fail open on Redis error

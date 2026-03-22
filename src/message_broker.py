@@ -12,7 +12,6 @@ messaging capabilities built on Redis:
    to any number of listeners in real time. Used here to announce
    events like "order placed" so that multiple services can react.
 
-TODO: Implement all methods marked with TODO.
 """
 
 import redis
@@ -34,7 +33,7 @@ class MessageBroker:
         """
         Initialize the MessageBroker.
 
-        TODO: Set self.enabled based on whether redis_client is available.
+        Set self.enabled based on whether redis_client is available.
 
         Args:
             redis_client: An active redis.Redis connection, or None.
@@ -43,7 +42,12 @@ class MessageBroker:
         self.enabled = False
         self.pubsub = None
 
-        # TODO: Set self.enabled based on redis_client availability
+        # Set self.enabled based on whether redis_client is available
+        try:
+            self.redis_client.ping()  # Test connection
+            self.enabled = True
+        except Exception:
+            self.enabled = False       
 
     # ----------------------------------------------------------------
     # Message Queue Methods (using Redis Lists)
@@ -53,7 +57,7 @@ class MessageBroker:
         """
         Add a message to the end of a queue.
 
-        TODO: Serialize and append the message to the queue.
+        Serialize and append the message to the queue.
 
         Args:
             queue_name: The Redis list key used as the queue.
@@ -62,14 +66,23 @@ class MessageBroker:
         Returns:
             True if the message was added to the queue, False otherwise.
         """
-        # TODO: Implement message enqueue
-        return False
+        # Implement message enqueue
+        added = False
+        if not self.enabled:
+            return added
+        try:
+            # Serialize the message dict to a JSON string and push it to the Redis list
+            self.redis_client.rpush(queue_name, json.dumps(message))
+            added = True
+        except redis.RedisError:
+            added = False
+        return added
 
     def dequeue(self, queue_name: str, timeout: int = 1) -> Optional[dict]:
         """
         Remove and return the oldest message from the front of a queue.
 
-        TODO: Wait for and return the next message from the front of the queue.
+        Wait for and return the next message from the front of the queue.
         Use a blocking approach so the caller waits efficiently.
 
         Args:
@@ -79,14 +92,24 @@ class MessageBroker:
         Returns:
             The message dict, or None if no message within the timeout.
         """
-        # TODO: Implement message dequeue
+        # Implement message dequeue
+        if not self.enabled:
+            return None
+        try:
+            # Use BLPOP from Redis to block until a message is available or timeout occurs
+            message = self.redis_client.blpop(queue_name, timeout=timeout)
+            if message:
+                # message is a tuple (queue_name, message_json)
+                return json.loads(message[1])  # Deserialize JSON string to dict
+        except redis.RedisError:
+            pass
         return None
 
     def queue_length(self, queue_name: str) -> int:
         """
         Get the number of messages waiting in a queue.
 
-        TODO: Return the number of messages waiting in the queue.
+        Return the number of messages waiting in the queue.
 
         Args:
             queue_name: The Redis list key used as the queue.
@@ -94,7 +117,13 @@ class MessageBroker:
         Returns:
             The number of messages in the queue.
         """
-        # TODO: Implement queue length check
+        # Implement queue length check
+        if not self.enabled:
+            return 0
+        try:
+            return self.redis_client.llen(queue_name)
+        except redis.RedisError:
+            pass            
         return 0
 
     # ----------------------------------------------------------------
@@ -105,7 +134,7 @@ class MessageBroker:
         """
         Publish a message to a channel.
 
-        TODO: Serialize and broadcast the message to all channel subscribers.
+        Serialize and broadcast the message to all channel subscribers.
 
         Args:
             channel: The pub/sub channel name.
@@ -114,14 +143,20 @@ class MessageBroker:
         Returns:
             The number of subscribers that received the message.
         """
-        # TODO: Implement pub/sub publish
+        # Implement pub/sub publish
+        if not self.enabled:
+            return 0
+        try:
+            return self.redis_client.publish(channel, json.dumps(message))
+        except redis.RedisError:
+            pass
         return 0
 
     def subscribe(self, channel: str):
         """
         Subscribe to a channel and return the PubSub object.
 
-        TODO: Create a subscription to the given channel.
+        Create a subscription to the given channel.
         Drain the initial confirmation message before returning.
 
         Args:
@@ -130,14 +165,24 @@ class MessageBroker:
         Returns:
             The PubSub object for listening, or None on error.
         """
-        # TODO: Implement pub/sub subscribe
+        # Implement pub/sub subscribe
+        if not self.enabled:
+            return None
+        try:
+            # Create a PubSub object and subscribe to the channel
+            self.pubsub = self.redis_client.pubsub()
+            self.pubsub.subscribe(channel)
+            self.pubsub.get_message(timeout=1)  # Wait for the subscription confirmation
+            return self.pubsub
+        except redis.RedisError:
+            pass
         return None
 
     def get_message(self, timeout: float = 1.0) -> Optional[dict]:
         """
         Get the next message from a subscribed channel.
 
-        TODO: Poll for the next data message from the subscription.
+        Poll for the next data message from the subscription.
 
         Args:
             timeout: How many seconds to wait for a message.
@@ -145,14 +190,35 @@ class MessageBroker:
         Returns:
             The message dict, or None if nothing available.
         """
-        # TODO: Implement getting messages from subscription
+        # Implement getting messages from subscription
+        if not self.enabled:
+            return None
+        if self.pubsub:
+            try:
+                # Use the PubSub object to get the next message, waiting up to the timeout
+                message = self.pubsub.get_message(timeout=timeout)
+                # The message dict will have a 'type' field; we only want 'message' types which contain data
+                if message and message['type'] == 'message':
+                    return json.loads(message['data'])  # Deserialize JSON string to dict
+            except redis.RedisError:
+                pass
         return None
 
     def unsubscribe(self):
         """
         Unsubscribe from all channels and clean up resources.
 
-        TODO: Clean up the pub/sub subscription and release resources.
+        Clean up the pub/sub subscription and release resources.
         """
-        # TODO: Implement unsubscribe and cleanup
-        pass
+        # Implement unsubscribe and cleanup
+        if not self.enabled:
+            return
+        if self.pubsub:
+            try:
+                self.pubsub.unsubscribe()  # Unsubscribe from all channels
+                self.pubsub.close()        # Close the PubSub connection
+            except redis.RedisError:
+                pass
+            finally:
+                self.pubsub = None
+        

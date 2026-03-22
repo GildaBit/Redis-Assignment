@@ -55,20 +55,41 @@ def run_queue_worker(broker: MessageBroker, database: Database):
     """
     Continuously consume orders from the message queue and process them.
 
-    TODO: Continuously dequeue and process orders. Support graceful shutdown.
+    Continuously dequeue and process orders. Support graceful shutdown.
     """
-    # TODO: Implement the queue consumer loop
-    print("Queue worker is not yet implemented.")
+    # queue consumer loop
+    while True:
+        try:
+            order = broker.dequeue(ORDER_QUEUE, timeout=5) # Wait for an order with a timeout to allow graceful shutdown
+            if order:
+                process_order(order, database)
+        except Exception as e:
+            time.sleep(1) # Sleep briefly on error to avoid tight loop
+
+    
 
 
 def run_event_listener(broker: MessageBroker):
     """
     Subscribe to the order events channel and print events as they arrive.
 
-    TODO: Subscribe to order events and print each one. Clean up on exit.
+    Subscribe to order events and print each one. Clean up on exit.
     """
-    # TODO: Implement the event listener
-    print("Event listener is not yet implemented.")
+    # event listener
+    try:
+        pubsub = broker.redis_client.pubsub()
+        pubsub.subscribe(ORDER_CHANNEL)
+        print(f"Subscribed to channel '{ORDER_CHANNEL}'")
+        message = broker.get_message(pubsub, timeout=5) # Wait for messages with a timeout to allow graceful shutdown
+        while message:
+            if message["type"] == "message":
+                event_data = message["data"]
+                print(f"Received event on channel '{ORDER_CHANNEL}': {event_data}")
+            message = broker.get_message(pubsub, timeout=5)
+    except Exception as e:
+        pass
+    finally:
+        broker.unsubscribe()
 
 
 def main():
