@@ -81,6 +81,7 @@ def run_event_listener(broker: MessageBroker):
         pubsub.subscribe(ORDER_CHANNEL)
         print(f"Subscribed to channel '{ORDER_CHANNEL}'")
         message = broker.get_message(pubsub, timeout=5) # Wait for messages with a timeout to allow graceful shutdown
+        # Listen for messages and print them
         while message:
             if message["type"] == "message":
                 event_data = message["data"]
